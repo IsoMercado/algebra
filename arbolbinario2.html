@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Binario con árbol</title>
+<link rel="stylesheet" href="arbol.css">
+</head>
+<body>
+<main>
+  <header class="hero">
+    <div class="logo" aria-hidden="true"><span>0</span><span>1</span></div>
+    <h1>Decimal a binario con árbol</h1>
+    <p class="sub">Dividí entre 2 y escribí solo el cociente (la parte entera). El resto lo calcula el programa.</p>
+  </header>
+
+  <section class="card" id="inicio">
+    <label for="numero">Ingresá un número entero positivo</label>
+    <div class="row">
+      <input type="number" id="numero" min="1" step="1" inputmode="numeric" placeholder="Ej: 13">
+      <button id="btnEmpezar" type="button">Empezar</button>
+    </div>
+    <p class="error" id="errInicio" role="alert"></p>
+  </section>
+
+  <section class="card hidden" id="juego">
+    <div class="paso-head">
+      <span class="badge" id="badgePaso">Paso 1</span>
+      <p class="paso" id="paso"></p>
+    </div>
+    <label for="cociente">Cociente (parte entera)</label>
+    <div class="row">
+      <input type="number" id="cociente" min="0" step="1" inputmode="numeric">
+      <button id="btnCociente" type="button">Aceptar</button>
+    </div>
+    <p class="error" id="errJuego" role="alert"></p>
+  </section>
+
+  <section class="card hidden" id="arbolCard">
+    <div class="tree-head">
+      <h2 id="arbolTitulo">Así va el árbol</h2>
+      <div class="toggle" role="group" aria-label="Vista del árbol">
+        <button type="button" id="vGrafico" aria-pressed="true">Gráfico</button>
+        <button type="button" id="vSimbolos" aria-pressed="false">Símbolos</button>
+      </div>
+    </div>
+    <p class="legend">izquierda = cociente · derecha = resto</p>
+    <div class="tree-wrap" id="arbolWrap" data-vista="grafico">
+      <svg class="arbol-svg" id="arbolSvg" role="img" aria-label="Árbol de divisiones"></svg>
+      <pre class="tree" id="arbolPre"></pre>
+    </div>
+  </section>
+
+  <section class="card hidden" id="final">
+    <h2>Resultado</h2>
+    <p class="resultado" id="textoResultado"></p>
+    <div class="chips" id="chips" aria-label="Bits del resultado"></div>
+    <p class="veredicto" id="veredicto"></p>
+    <div id="correctoBox" class="hidden">
+      <hr class="separador">
+      <h2>Así era el árbol correcto</h2>
+      <p class="legend">izquierda = cociente · derecha = resto</p>
+      <div class="tree-wrap" id="correctoWrap" data-vista="grafico">
+        <svg class="arbol-svg" id="correctoSvg" role="img" aria-label="Árbol correcto"></svg>
+        <pre class="tree" id="correctoPre"></pre>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="ghost" id="btnRepetir" type="button">↻ Repetir animación</button>
+      <button class="ghost" id="btnReiniciar" type="button">Probar con otro número</button>
+    </div>
+  </section>
+</main>
+
+<script>
+// ---------- Lógica ----------
+var MAX_PASOS = 64;
+
+// pasos: lista de [dividendo, cociente, resto]
+function dibujarArbol(pasos) {
+  var k = pasos.length;
+  if (k === 0) return "";
+
+  var raiz = String(pasos[0][0]);
+  var cocientes = pasos.map(function (p) { return String(p[1]); });
+  var restos = pasos.map(function (p) { return "(" + p[2] + ")"; });
+
+  var ancho = Math.max.apply(null, [raiz].concat(cocientes, restos).map(function (t) { return t.length; }));
+  var u = ancho + 3;
+  var margen = Math.floor(ancho / 2) + 1;
+
+  var centros = [];
+  for (var i = 0; i <= k; i++) centros.push(margen + u * (k - i));
+
+  var filas = 2 * k + 1;
+  var columnas = centros[0] + u + ancho + 2;
+  var lienzo = [];
+  for (var f = 0; f < filas; f++) {
+    var fila = [];
+    for (var c = 0; c < columnas; c++) fila.push(" ");
+    lienzo.push(fila);
+  }
+
+  function escribir(fila, centro, texto) {
+    var inicio = centro - Math.floor(texto.length / 2);
+    for (var j = 0; j < texto.length; j++) lienzo[fila][inicio + j] = texto[j];
+  }
+
+  escribir(0, centros[0], raiz);
+  for (var n = 0; n < k; n++) {
+    escribir(2 * n + 1, centros[n] - Math.floor(u / 2), "/");
+    escribir(2 * n + 1, centros[n] + Math.floor(u / 2), "\\");
+    escribir(2 * n + 2, centros[n + 1], cocientes[n]);
+    escribir(2 * n + 2, centros[n] + u, restos[n]);
+  }
+
+  return lienzo.map(function (fila) { return fila.join("").replace(/\s+$/, ""); }).join("\n");
+}
+
+function pasosCorrectos(n) {
+  var pasos = [];
+  while (n > 0) {
+    pasos.push([n, Math.floor(n / 2), n % 2]);
+    n = Math.floor(n / 2);
+  }
+  return pasos;
+}
+
+function resultadoDe(pasos) {
+  return pasos.map(function (p) { return p[2]; }).reverse().join("");
+}
+
+// ---------- Gráfico animado (SVG) ----------
+var NS = "http://www.w3.org/2000/svg";
+
+// op: { nuevoDesde, escalonado, activo, leer, retardo }
+// Devuelve el segundo en que termina de dibujarse el árbol.
+function dibujarGrafico(svg, pasos, op) {
+  op = op || {};
+  svg.textContent = "";
+  var k = pasos.length;
+  if (k === 0) return 0;
+
+  var etiquetas = [String(pasos[0][0])].concat(pasos.map(function (p) { return String(p[1]); }));
+  var maxLen = Math.max.apply(null, etiquetas.map(function (t) { return t.length; }));
+  var r = Math.max(22, Math.ceil(maxLen * 9.6 / 2) + 10);
+  var dx = 2 * r + 40, dy = 2 * r + 30, pad = 28, bw = 46, bh = 38;
+
+  function X(i) { return pad + r + (k - i) * dx; }
+  function Y(i) { return pad + r + i * dy; }
+  function BX(i) { return X(i) + dx * 0.95; }
+
+  var ancho = Math.ceil(BX(0) + bw / 2 + pad);
+  var alto = Math.ceil(Y(k) + r + pad);
+  svg.setAttribute("viewBox", "0 0 " + ancho + " " + alto);
+  svg.setAttribute("width", ancho);
+  svg.setAttribute("height", alto);
+
+  function mk(tag, attrs, padre) {
+    var e = document.createElementNS(NS, tag);
+    for (var a in attrs) e.setAttribute(a, attrs[a]);
+    padre.appendChild(e);
+    return e;
+  }
+  function anim(base, animar, d, extra) {
+    if (!animar) return { "class": base };
+    return { "class": base + " anim", style: "--d:" + d.toFixed(2) + "s" + (extra || "") };
+  }
+  function texto(x, y, padre, valor) {
+    var t = mk("text", { x: x, y: y, "class": "txt", "text-anchor": "middle", "dominant-baseline": "central" }, padre);
+    t.textContent = valor;
+  }
+
+  var desde = op.nuevoDesde || 0;
+  var esc = !!op.escalonado;
+  var retardo = op.retardo || 0;
+  var paso = esc ? Math.min(0.5, 3.6 / k) : 0;
+  var animaRaiz = esc || desde === 0;
+  var inicio = animaRaiz ? 0.3 : 0;
+  var tFin = retardo + inicio + (k - 1) * paso + 1.2;
+
+  var gRamas = mk("g", { "class": "ramas" }, svg);
+  var gNodos = mk("g", { "class": "nodos" }, svg);
+
+  var gRaiz = mk("g", anim("nodo raiz", animaRaiz, retardo), gNodos);
+  mk("circle", { cx: X(0), cy: Y(0), r: r }, gRaiz);
+  texto(X(0), Y(0), gRaiz, etiquetas[0]);
+
+  for (var i = 0; i < k; i++) {
+    var an = esc || i >= desde;
+    var base = retardo + inicio + i * paso;
+    var ultimo = i === k - 1;
+
+    // ramas (se "dibujan" con una línea que avanza)
+    mk("path", Object.assign(anim("rama", an, base), {
+      d: "M" + X(i) + " " + Y(i) + " L" + X(i + 1) + " " + Y(i + 1), pathLength: 1
+    }), gRamas);
+    mk("path", Object.assign(anim("rama", an, base + 0.12), {
+      d: "M" + X(i) + " " + Y(i) + " L" + BX(i) + " " + Y(i + 1), pathLength: 1
+    }), gRamas);
+
+    // anillo que late en el número que falta dividir
+    if (ultimo && op.activo) {
+      mk("circle", {
+        cx: X(i + 1), cy: Y(i + 1), r: r, "class": "pulso",
+        style: "--d:" + (base + 0.9).toFixed(2) + "s"
+      }, gNodos);
+    }
+
+    // nodo del cociente
+    var claseQ = "nodo" + (ultimo ? (!op.activo && pasos[i][1] === 0 ? " fin" : " ultimo") : "");
+    var gq = mk("g", anim(claseQ, an, base + 0.35), gNodos);
+    mk("circle", { cx: X(i + 1), cy: Y(i + 1), r: r }, gq);
+    texto(X(i + 1), Y(i + 1), gq, etiquetas[i + 1]);
+
+    // nodo del resto (el bit); con "leer" destella de abajo hacia arriba
+    var extraL = op.leer ? ";--l:" + (tFin + (k - 1 - i) * 0.3).toFixed(2) + "s" : "";
+    var gb = mk("g", anim("nodo bit" + (op.leer ? " leer" : ""), an, base + 0.45, extraL), gNodos);
+    mk("rect", { x: BX(i) - bw / 2, y: Y(i + 1) - bh / 2, width: bw, height: bh, rx: 10 }, gb);
+    texto(BX(i), Y(i + 1) + 1, gb, String(pasos[i][2]));
+  }
+  return tFin;
+}
+
+// ---- UI ----
+var $ = function (id) { return document.getElementById(id); };
+var numero = 0, dividendo = 0, pasos = [];
+var estado = { ok: false };
+
+// Vista "Símbolos": el texto solo tiene dígitos, paréntesis, barras y espacios.
+// op: { desde, paso, retardo }  -> las líneas desde "desde" aparecen animadas
+function pintarArbol(elemento, texto, op) {
+  op = op || {};
+  var desde = op.desde === undefined ? Infinity : op.desde;
+  var paso = op.paso || 0.15;
+  var retardo = op.retardo || 0;
+  elemento.textContent = "";
+  texto.split("\n").forEach(function (linea, idx) {
+    var cont = document.createElement("span");
+    cont.className = "linea" + (idx >= desde ? " nueva" : "");
+    if (idx >= desde) cont.setAttribute("style", "--d:" + (retardo + (idx - desde) * paso).toFixed(2) + "s");
+    linea.split(/(\(\d+\)|[\/\\])/).forEach(function (parte) {
+      if (parte === "") return;
+      var span = document.createElement("span");
+      if (/^\(\d+\)$/.test(parte)) span.className = "bit";
+      else if (parte === "/" || parte === "\\") span.className = "rama";
+      else if (idx === 0 && parte.trim() !== "") span.className = "raiz";
+      span.textContent = parte;
+      cont.appendChild(span);
+    });
+    elemento.appendChild(cont);
+  });
+}
+
+function dibujarEn(prefijo, lista, opGrafico, opTexto) {
+  var t = dibujarGrafico($(prefijo + "Svg"), lista, opGrafico);
+  pintarArbol($(prefijo + "Pre"), dibujarArbol(lista), opTexto);
+  return t;
+}
+
+function aplicarVista(v) {
+  ["arbolWrap", "correctoWrap"].forEach(function (id) { $(id).setAttribute("data-vista", v); });
+  $("vGrafico").setAttribute("aria-pressed", String(v === "grafico"));
+  $("vSimbolos").setAttribute("aria-pressed", String(v === "simbolos"));
+}
+
+function reiniciarAnim(el) {
+  el.style.animation = "none";
+  void el.offsetWidth;
+  el.style.animation = "";
+}
+
+function esEnteroValido(texto, minimo) {
+  if (!/^-?\d+$/.test(texto.trim())) return null;
+  var v = parseInt(texto, 10);
+  if (!isFinite(v) || v < minimo) return null;
+  return v;
+}
+
+function empezar() {
+  var v = esEnteroValido($("numero").value, 1);
+  if (v === null) {
+    $("errInicio").textContent = "Ingresá un número entero mayor o igual a 1.";
+    return;
+  }
+  if (v > 1e15) {
+    $("errInicio").textContent = "Elegí un número más chico (hasta 1.000.000.000.000.000).";
+    return;
+  }
+  $("errInicio").textContent = "";
+  numero = v;
+  dividendo = v;
+  pasos = [];
+  $("inicio").classList.add("hidden");
+  $("final").classList.add("hidden");
+  $("arbolCard").classList.add("hidden");
+  $("juego").classList.remove("hidden");
+  mostrarPaso();
+}
+
+function mostrarPaso() {
+  $("badgePaso").textContent = "Paso " + (pasos.length + 1);
+  $("paso").textContent = dividendo + " ÷ 2";
+  $("cociente").value = "";
+  $("errJuego").textContent = "";
+  $("cociente").focus();
+}
+
+function aceptarCociente() {
+  var c = esEnteroValido($("cociente").value, 0);
+  if (c === null) {
+    $("errJuego").textContent = "Ingresá un número entero mayor o igual a 0.";
+    return;
+  }
+  var resto = dividendo % 2; // el resto lo calcula el programa
+  pasos.push([dividendo, c, resto]);
+  dividendo = c;
+
+  if (dividendo === 0 || pasos.length >= MAX_PASOS) {
+    terminar();
+  } else {
+    var k = pasos.length;
+    $("arbolTitulo").textContent = "Así va el árbol";
+    $("arbolCard").classList.remove("hidden");
+    // solo lo nuevo se anima; lo que ya estaba queda quieto
+    dibujarEn("arbol", pasos,
+      { nuevoDesde: k - 1, activo: true },
+      { desde: k === 1 ? 0 : 2 * (k - 1) + 1, paso: 0.15 });
+    mostrarPaso();
+  }
+}
+
+function dibujarFinal() {
+  var k = pasos.length;
+  var pasoTxt = Math.min(0.12, 2.4 / (2 * k + 1));
+
+  var tFin = dibujarEn("arbol", pasos,
+    { escalonado: true, leer: true },
+    { desde: 0, paso: pasoTxt });
+
+  // los bits del resultado aparecen en el mismo orden en que destellan en el árbol
+  var chips = $("chips");
+  chips.textContent = "";
+  resultadoDe(pasos).split("").forEach(function (bit, i) {
+    var chip = document.createElement("span");
+    chip.className = "chip";
+    chip.style.animationDelay = (tFin + i * 0.3).toFixed(2) + "s";
+    chip.textContent = bit;
+    chips.appendChild(chip);
+  });
+
+  var tVeredicto = tFin + k * 0.3 + 0.2;
+  var v = $("veredicto");
+  reiniciarAnim(v);
+  v.style.animationDelay = tVeredicto.toFixed(2) + "s";
+
+  if (!estado.ok) {
+    var pc = pasosCorrectos(numero);
+    var retardo = tVeredicto + 1.0;
+    dibujarEn("correcto", pc,
+      { escalonado: true, leer: true, retardo: retardo },
+      { desde: 0, paso: Math.min(0.12, 2.4 / (2 * pc.length + 1)), retardo: retardo });
+  }
+}
+
+function terminar() {
+  $("juego").classList.add("hidden");
+  $("arbolTitulo").textContent = "Árbol final (el que armaste vos)";
+  $("arbolCard").classList.remove("hidden");
+
+  var tuResultado = resultadoDe(pasos);
+  var correcto = numero.toString(2);
+
+  var texto = numero + " en binario, leyendo los restos de abajo hacia arriba:";
+  if (dividendo > 0) {
+    texto += " (se alcanzó el máximo de " + MAX_PASOS + " pasos sin llegar a cociente 0)";
+  }
+  $("textoResultado").textContent = texto;
+
+  estado.ok = tuResultado === correcto;
+  var v = $("veredicto");
+  v.className = "veredicto " + (estado.ok ? "ok" : "bad");
+  if (estado.ok) {
+    v.textContent = "✅ El resultado es CORRECTO. ¡Muy bien!";
+    $("correctoBox").classList.add("hidden");
+  } else {
+    v.textContent = "❌ El resultado es INCORRECTO. La respuesta correcta es: " + correcto;
+    $("correctoBox").classList.remove("hidden");
+  }
+  $("final").classList.remove("hidden");
+  dibujarFinal();
+}
+
+function reiniciar() {
+  $("final").classList.add("hidden");
+  $("arbolCard").classList.add("hidden");
+  $("juego").classList.add("hidden");
+  $("inicio").classList.remove("hidden");
+  $("numero").value = "";
+  $("numero").focus();
+}
+
+$("btnEmpezar").addEventListener("click", empezar);
+$("btnCociente").addEventListener("click", aceptarCociente);
+$("btnRepetir").addEventListener("click", dibujarFinal);
+$("btnReiniciar").addEventListener("click", reiniciar);
+$("vGrafico").addEventListener("click", function () { aplicarVista("grafico"); });
+$("vSimbolos").addEventListener("click", function () { aplicarVista("simbolos"); });
+$("numero").addEventListener("keydown", function (e) { if (e.key === "Enter") empezar(); });
+$("cociente").addEventListener("keydown", function (e) { if (e.key === "Enter") aceptarCociente(); });
+</script>
+</body>
+</html>
